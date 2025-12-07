@@ -5,9 +5,9 @@ tags:
   - text-to-speech
   - automatic-speech-recognition
 ---
-<h1 align="center">
-    <img width="100%" src="./assets/logo.png" alt="">
-</h1>
+<div align="center" style="text-align: center;">
+  <img src="./assets/logo.png" alt="logo" width="300" style="display: block; margin: 0 auto;" />
+</div>
 
 <p align="center">
    <a href="https://github.com/getcharzp/go-speech/fork" target="blank">

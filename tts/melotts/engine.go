@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/getcharzp/go-speech"
 	"github.com/up-zero/gotool/convertutil"
-	"github.com/up-zero/gotool/mediautil" // 假设这是你使用的工具库
+	"github.com/up-zero/gotool/mediautil"
 	ort "github.com/yalue/onnxruntime_go"
 )
 
