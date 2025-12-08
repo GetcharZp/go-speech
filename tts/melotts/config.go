@@ -1,5 +1,7 @@
 package melotts
 
+import "github.com/getcharzp/go-speech"
+
 const (
 	// SampleRate 采样率，默认为 44100
 	SampleRate = 44100
@@ -27,7 +29,7 @@ type Config struct {
 // DefaultConfig 返回一套默认的配置 (基于常见的目录结构)
 func DefaultConfig() Config {
 	return Config{
-		OnnxRuntimeLibPath: "./lib/onnxruntime.dll",
+		OnnxRuntimeLibPath: speech.DefaultLibraryPath(),
 		ModelPath:          "./melo_weights/model.onnx",
 		TokenPath:          "./melo_weights/tokens.txt",
 		LexiconPath:        "./melo_weights/lexicon.txt",
