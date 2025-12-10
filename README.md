@@ -71,7 +71,7 @@ func main() {
 ```
 
 <audio controls>
-  <source src="https://raw.githubusercontent.com/getcharzp/go-speech/assets/output.wav" type="audio/wav">
+  <source src="https://raw.githubusercontent.com/GetcharZp/go-speech/master/assets/output.wav" type="audio/wav">
 </audio>
 
 ### ASR
