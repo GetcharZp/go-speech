@@ -20,7 +20,7 @@ func TestParaformer(t *testing.T) {
 	}
 	defer asrEngine.Destroy()
 
-	text, err := asrEngine.RecognizeFile("./zh-en.wav")
+	text, err := asrEngine.TranscribeFile("./zh-en.wav")
 	if err != nil {
 		t.Fatalf("识别出错: %v", err)
 		return

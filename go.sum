@@ -1,4 +1,10 @@
 github.com/up-zero/gotool v0.0.0-20251206003902-bde76422a8d8 h1:KBFHSPq6gG49K8/CJgzz4Hm9N54eWcTcKlZFeVEBmII=
 github.com/up-zero/gotool v0.0.0-20251206003902-bde76422a8d8/go.mod h1:+jwIpLHojqHUvbEmNXv/F5acdHSEkJIbNXRqT1IE78I=
+github.com/up-zero/gotool v0.0.0-20251215012308-8ffba662d9cc h1:p2fDxGrW1IQJOdc/fre3+vpTP9o62C5kRf+mPSFnf/E=
+github.com/up-zero/gotool v0.0.0-20251215012308-8ffba662d9cc/go.mod h1:+jwIpLHojqHUvbEmNXv/F5acdHSEkJIbNXRqT1IE78I=
+github.com/up-zero/gotool v0.0.0-20251218150942-7b6fc13c764a h1:abrprMtNOXfYT1fmQa52PEJeVjG/bNhF+Cc+KD52I6U=
+github.com/up-zero/gotool v0.0.0-20251218150942-7b6fc13c764a/go.mod h1:+jwIpLHojqHUvbEmNXv/F5acdHSEkJIbNXRqT1IE78I=
+github.com/up-zero/gotool v0.0.0-20251219081745-85f734bac77c h1:yfBzuYoUIIGtuWMipu4oJgS0cMNYwcrjtH6DURvpHe0=
+github.com/up-zero/gotool v0.0.0-20251219081745-85f734bac77c/go.mod h1:+jwIpLHojqHUvbEmNXv/F5acdHSEkJIbNXRqT1IE78I=
 github.com/yalue/onnxruntime_go v1.22.0 h1:SzqOfFRRrLRRAFR5VoSxABjTiQSAi8Y4ETYKrMFK1jk=
 github.com/yalue/onnxruntime_go v1.22.0/go.mod h1:b4X26A8pekNb1ACJ58wAXgNKeUCGEAQ9dmACut9Sm/4=

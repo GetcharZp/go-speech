@@ -69,38 +69,38 @@ func (p *Engine) Destroy() error {
 	return nil
 }
 
-// RecognizeFile 读取 WAV 文件并进行语音识别
+// TranscribeFile 读取 WAV 文件并进行语音识别
 //
 // # Params:
 //
 //	wavPath: 音频文件路径
-func (p *Engine) RecognizeFile(wavPath string) (string, error) {
+func (p *Engine) TranscribeFile(wavPath string) (string, error) {
 	wavBytes, err := os.ReadFile(wavPath)
 	if err != nil {
 		return "", fmt.Errorf("无法读取文件: %v", err)
 	}
-	return p.RecognizeBytes(wavBytes)
+	return p.TranscribeBytes(wavBytes)
 }
 
-// RecognizeBytes 读取 WAV 字节流并进行语音识别
+// TranscribeBytes 读取 WAV 字节流并进行语音识别
 //
 // # Params:
 //
 //	wavBytes: 音频文件字节流
-func (p *Engine) RecognizeBytes(wavBytes []byte) (string, error) {
+func (p *Engine) TranscribeBytes(wavBytes []byte) (string, error) {
 	samples, err := parseWavBytes(wavBytes)
 	if err != nil {
 		return "", fmt.Errorf("无法将 PCM 数据转换为 float32: %v", err)
 	}
-	return p.Recognize(samples)
+	return p.Transcribe(samples)
 }
 
-// Recognize 对 float32 音频样本数据进行识别
+// Transcribe 对 float32 音频样本数据进行识别
 //
 // # Params:
 //
 //	samples: 采样率为 16KHz 的单声道音频数据，范围 [-1, 1]
-func (p *Engine) Recognize(samples []float32) (string, error) {
+func (p *Engine) Transcribe(samples []float32) (string, error) {
 	if len(samples) == 0 {
 		return "", fmt.Errorf("输入的音频数据为空")
 	}
