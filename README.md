@@ -19,9 +19,6 @@ tags:
    <a href="https://github.com/getcharzp/go-speech/pulls" target="blank">
       <img src="https://img.shields.io/github/issues-pr/getcharzp/go-speech?style=for-the-badge" alt="go-speech pull-requests"/>
    </a>
-   <a href='https://github.com/getcharzp/go-speech/releases'>
-      <img src='https://img.shields.io/github/release/getcharzp/go-speech?&label=Latest&style=for-the-badge'>
-   </a>
 </p>
 
 go-speech 基于 Golang + [ONNX](https://github.com/microsoft/onnxruntime/releases/tag/v1.23.2) 构建的轻量语音库，支持 TTS（文本转语音）与 ASR（语音转文字）。 集成 MeloTTS 、达摩院 Paraformer 架构模型、Whisper 模型。

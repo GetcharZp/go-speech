@@ -16,7 +16,7 @@ var (
 // extractFeatures 特征处理
 //
 // 流程: Wave -> FilterBank -> LFR -> CMVN
-func (p *Engine) extractFeatures(samples []float32) ([]float32, int32, error) {
+func (e *Engine) extractFeatures(samples []float32) ([]float32, int32, error) {
 	const (
 		melBins = 80
 		lfrM    = 7 // Window size
@@ -36,8 +36,8 @@ func (p *Engine) extractFeatures(samples []float32) ([]float32, int32, error) {
 	}
 
 	// CMVN
-	if len(p.negMean) > 0 && len(p.invStd) > 0 {
-		mediautil.ApplyCMVN(lfrData, p.negMean, p.invStd)
+	if len(e.negMean) > 0 && len(e.invStd) > 0 {
+		mediautil.ApplyCMVN(lfrData, e.negMean, e.invStd)
 	}
 
 	// 展平为一维数组

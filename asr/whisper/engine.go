@@ -3,8 +3,8 @@ package whisper
 import (
 	"fmt"
 	"github.com/getcharzp/go-speech"
+	ort "github.com/getcharzp/onnxruntime_purego"
 	"github.com/up-zero/gotool/convertutil"
-	ort "github.com/yalue/onnxruntime_go"
 	"math"
 	"os"
 	"strings"
@@ -13,8 +13,8 @@ import (
 
 // Engine 封装了 Whisper 的 ONNX 运行时和相关资源
 type Engine struct {
-	encSession  *ort.DynamicAdvancedSession
-	decSession  *ort.DynamicAdvancedSession
+	encSession  *ort.Session
+	decSession  *ort.Session
 	tokenMap    map[int]string
 	addTokenMap map[string]int
 
@@ -31,18 +31,16 @@ type Engine struct {
 
 // NewEngine 初始化 Whisper 引擎
 func NewEngine(cfg Config) (*Engine, error) {
-	onnxConfig := new(speech.OnnxConfig)
-	if err := convertutil.CopyProperties(cfg, onnxConfig); err != nil {
-		return nil, fmt.Errorf("复制参数失败: %w", err)
-	}
+	oc := new(speech.OnnxConfig)
+	_ = convertutil.CopyProperties(cfg, oc)
+
 	// 初始化 ONNX
-	if err := onnxConfig.New(); err != nil {
+	if err := oc.New(); err != nil {
 		return nil, err
 	}
 
 	// 创建 Encoder 会话
-	encSession, err := ort.NewDynamicAdvancedSession(cfg.EncoderModelPath,
-		[]string{"input_features"}, []string{"last_hidden_state"}, onnxConfig.SessionOptions)
+	encSession, err := oc.OnnxEngine.NewSession(cfg.EncoderModelPath, oc.SessionOptions)
 	if err != nil {
 		return nil, fmt.Errorf("创建 Encoder 会话失败: %w", err)
 	}
@@ -64,7 +62,7 @@ func NewEngine(cfg Config) (*Engine, error) {
 	}
 
 	// 创建 Decoder 会话
-	decSession, err := ort.NewDynamicAdvancedSession(cfg.DecoderModelPath, decInputNames, decOutputNames, onnxConfig.SessionOptions)
+	decSession, err := oc.OnnxEngine.NewSession(cfg.DecoderModelPath, oc.SessionOptions)
 	if err != nil {
 		encSession.Destroy()
 		return nil, fmt.Errorf("创建 Decoder 会话失败: %w", err)
@@ -134,22 +132,26 @@ func (e *Engine) Transcribe(samples []float32, opt ...TranscribeOption) (string,
 		return "", err
 	}
 
-	encIn, _ := ort.NewTensor(ort.NewShape(1, 80, 3000), features)
+	encIn, _ := ort.NewTensor([]int64{1, 80, 3000}, features)
 	defer encIn.Destroy()
-	encOuts := make([]ort.Value, 1)
+
+	inputValues := map[string]*ort.Value{
+		"input_features": encIn,
+	}
 
 	// Encoder 推理
-	if err := e.encSession.Run([]ort.Value{encIn}, encOuts); err != nil {
+	outputValues, err := e.encSession.Run(inputValues)
+	if err != nil {
 		return "", fmt.Errorf("编码推理失败: %w", err)
 	}
-	encHiddenState := encOuts[0].(*ort.Tensor[float32])
-	defer encHiddenState.Destroy()
+	outputValue := outputValues["last_hidden_state"]
+	defer outputValue.Destroy()
 
-	return e.runMergedDecoder(encHiddenState, opt...)
+	return e.runMergedDecoder(outputValue, opt...)
 }
 
 // runMergedDecoder Merge Decoder 推理
-func (e *Engine) runMergedDecoder(encHiddenState *ort.Tensor[float32], opt ...TranscribeOption) (string, error) {
+func (e *Engine) runMergedDecoder(encHiddenState *ort.Value, opt ...TranscribeOption) (string, error) {
 	// prompt: [<|startoftranscript|>, <|language|>, <|task|>, <|notimestamps|>]
 	prompt := []int64{int64(e.sot)}
 	if len(opt) == 0 {
@@ -178,17 +180,20 @@ func (e *Engine) runMergedDecoder(encHiddenState *ort.Tensor[float32], opt ...Tr
 		return "", err
 	}
 
-	inputIdsTensor, _ := ort.NewTensor(ort.NewShape(1, int64(len(prompt))), prompt)
-	useCacheTensor, _ := ort.NewTensor(ort.NewShape(1), []bool{false})
+	inputIdsTensor, _ := ort.NewTensor([]int64{1, int64(len(prompt))}, prompt)
+	useCacheTensor, _ := ort.NewTensor([]int64{1}, []bool{false})
 
-	prefillInputs := make([]ort.Value, 0, 51)
-	prefillInputs = append(prefillInputs, inputIdsTensor)
-	prefillInputs = append(prefillInputs, encHiddenState)
-	prefillInputs = append(prefillInputs, useCacheTensor)
-	prefillInputs = append(prefillInputs, pastTensors...)
+	prefillInputs := map[string]*ort.Value{
+		"input_ids":             inputIdsTensor,
+		"encoder_hidden_states": encHiddenState,
+		"use_cache_branch":      useCacheTensor,
+	}
+	for name, value := range pastTensors {
+		prefillInputs[name] = value
+	}
 
-	outputs := make([]ort.Value, len(e.decOutputNames))
-	if err := e.decSession.Run(prefillInputs, outputs); err != nil {
+	outputs, err := e.decSession.Run(prefillInputs)
+	if err != nil {
 		inputIdsTensor.Destroy()
 		useCacheTensor.Destroy()
 		for _, t := range pastTensors {
@@ -202,18 +207,23 @@ func (e *Engine) runMergedDecoder(encHiddenState *ort.Tensor[float32], opt ...Tr
 		t.Destroy()
 	}
 
-	logits := outputs[0].(*ort.Tensor[float32])
+	logits := outputs["logits"]
 
 	nextTokenID := e.sampleTokenPrefill(logits)
 	logits.Destroy()
 
 	// 更新缓存
-	for i, t := range outputs[1:] {
-		pastTensors[i] = t
+	for name, t := range outputs {
+		if strings.Contains(name, "present") {
+			key := strings.ReplaceAll(name, "present", "past_key_values")
+			pastTensors[key] = t
+		}
 	}
 
 	generatedTokens := make([]int, 0)
 	generatedTokens = append(generatedTokens, nextTokenID)
+
+	loopInputs := make(map[string]*ort.Value, 3+len(pastTensors))
 
 	// 循环生成
 	for i := 0; i < e.maxTokens; i++ {
@@ -221,40 +231,43 @@ func (e *Engine) runMergedDecoder(encHiddenState *ort.Tensor[float32], opt ...Tr
 			break
 		}
 
-		currInTensor, _ := ort.NewTensor(ort.NewShape(1, 1), []int64{int64(nextTokenID)})
-		currCacheTensor, _ := ort.NewTensor(ort.NewShape(1), []bool{true})
+		currInTensor, _ := ort.NewTensor([]int64{1, 1}, []int64{int64(nextTokenID)})
+		currCacheTensor, _ := ort.NewTensor([]int64{1}, []bool{true})
 
-		inputs := make([]ort.Value, 0, 3+len(pastTensors))
-		inputs = append(inputs, currInTensor)
-		inputs = append(inputs, encHiddenState)
-		inputs = append(inputs, currCacheTensor)
-		inputs = append(inputs, pastTensors...)
+		loopInputs["input_ids"] = currInTensor
+		loopInputs["encoder_hidden_states"] = encHiddenState
+		loopInputs["use_cache_branch"] = currCacheTensor
+		for name, value := range pastTensors {
+			loopInputs[name] = value
+		}
 
-		newOutputs := make([]ort.Value, len(e.decOutputNames))
-		if err := e.decSession.Run(inputs, newOutputs); err != nil {
-			currInTensor.Destroy()
-			currCacheTensor.Destroy()
+		newOutputs, err := e.decSession.Run(loopInputs)
+		currInTensor.Destroy()
+		currCacheTensor.Destroy()
+		if err != nil {
 			return "", fmt.Errorf("第 %d 步解码推理失败: %w", i, err)
 		}
 
-		newLogits := newOutputs[0].(*ort.Tensor[float32])
+		newLogits := newOutputs["logits"]
 
-		// 清除 Decoder KV 缓存
-		for k := 0; k < len(pastTensors); k++ {
-			internalIdx := k % 4
-			if internalIdx == 0 || internalIdx == 1 {
-				pastTensors[k].Destroy()
+		// 更新 KV Cache
+		for name, newValue := range newOutputs {
+			if name == "logits" {
+				continue
 			}
-		}
 
-		// 更新 Decoder KV 缓存
-		for k := 0; k < len(newOutputs)-1; k++ {
-			newCacheTensor := newOutputs[k+1].(*ort.Tensor[float32])
-			internalIdx := k % 4
-			if internalIdx == 0 || internalIdx == 1 {
-				pastTensors[k] = newCacheTensor
+			if strings.Contains(name, "decoder") {
+				// 更新 Decoder 的 Key/Value (present.X.decoder.key/value)
+				key := strings.ReplaceAll(name, "present", "past_key_values")
+
+				// 销毁旧的缓存，存入新缓存
+				if oldV, ok := pastTensors[key]; ok {
+					oldV.Destroy()
+				}
+				pastTensors[key] = newValue
 			} else {
-				newCacheTensor.Destroy()
+				// encoder 部分直接销毁掉防止泄露
+				newValue.Destroy()
 			}
 		}
 
@@ -273,28 +286,30 @@ func (e *Engine) runMergedDecoder(encHiddenState *ort.Tensor[float32], opt ...Tr
 }
 
 // createPastTensors 创建缓存张量
-func (e *Engine) createPastTensors() ([]ort.Value, error) {
-	numTensors := e.modelLayers * 4
-	tensors := make([]ort.Value, numTensors)
-	shape := ort.NewShape(1, int64(e.numHeads), 0, 64)
-	var empty []float32
-	for i := 0; i < numTensors; i++ {
+func (e *Engine) createPastTensors() (map[string]*ort.Value, error) {
+	tensors := make(map[string]*ort.Value)
+	shape := []int64{1, int64(e.numHeads), 0, 64}
+	var empty = make([]float32, e.numHeads*64)
+
+	for i := 3; i < len(e.decInputNames); i++ {
+		name := e.decInputNames[i]
 		t, err := ort.NewTensor(shape, empty)
 		if err != nil {
-			for j := 0; j < i; j++ {
-				tensors[j].Destroy()
+			for _, v := range tensors {
+				v.Destroy()
 			}
 			return nil, err
 		}
-		tensors[i] = t
+		tensors[name] = t
 	}
+
 	return tensors, nil
 }
 
 // sampleTokenPrefill 获取词表中的最优 Token 索引（预解码）
-func (e *Engine) sampleTokenPrefill(logits *ort.Tensor[float32]) int {
-	data := logits.GetData()
-	shape := logits.GetShape()
+func (e *Engine) sampleTokenPrefill(logits *ort.Value) int {
+	data, _ := ort.GetTensorData[float32](logits)
+	shape, _ := logits.GetShape()
 
 	vocabSize := 51865
 
@@ -333,8 +348,8 @@ func (e *Engine) sampleTokenPrefill(logits *ort.Tensor[float32]) int {
 }
 
 // sampleToken 获取词表中的最优 Token 索引（循环）
-func (e *Engine) sampleToken(logits *ort.Tensor[float32], history []int) int {
-	data := logits.GetData()
+func (e *Engine) sampleToken(logits *ort.Value, history []int) int {
+	data, _ := ort.GetTensorData[float32](logits)
 	vocabSize := 51865
 	startIdx := len(data) - vocabSize
 

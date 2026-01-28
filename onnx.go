@@ -2,13 +2,14 @@ package speech
 
 import (
 	"fmt"
-	ort "github.com/yalue/onnxruntime_go"
+	ort "github.com/getcharzp/onnxruntime_purego"
 	"runtime"
 	"sync"
 )
 
 type OnnxConfig struct {
 	SessionOptions *ort.SessionOptions
+	OnnxEngine     *ort.Engine
 
 	// 必填参数
 	OnnxRuntimeLibPath string // onnxruntime.dll (或 .so, .dylib) 的路径
@@ -23,8 +24,9 @@ type OnnxConfig struct {
 }
 
 var (
-	initErr error
-	once    sync.Once
+	initErr    error
+	once       sync.Once
+	onnxEngine *ort.Engine
 )
 
 // New 初始化 ONNX 环境
@@ -34,20 +36,19 @@ func (cfg *OnnxConfig) New() error {
 		return fmt.Errorf("OnnxRuntimeLibPath 不能为空")
 	}
 	once.Do(func() {
-		ort.SetSharedLibraryPath(cfg.OnnxRuntimeLibPath)
-		initErr = ort.InitializeEnvironment()
+		onnxEngine, initErr = ort.NewEngine(cfg.OnnxRuntimeLibPath)
 	})
 	if initErr != nil {
 		return fmt.Errorf("初始化 ONNX Runtime 环境失败: %w", initErr)
 	}
 
 	// 创建会话选项 (设置线程)
-	options, err := ort.NewSessionOptions()
+	options, err := onnxEngine.NewSessionOptions()
 	if err != nil {
 		return err
 	}
 	if cfg.NumThreads > 0 {
-		if err := options.SetIntraOpNumThreads(cfg.NumThreads); err != nil {
+		if err := options.SetIntraOpNumThreads(int32(cfg.NumThreads)); err != nil {
 			return err
 		}
 	}
@@ -59,16 +60,12 @@ func (cfg *OnnxConfig) New() error {
 
 	// 启用CUDA
 	if cfg.UseCuda {
-		cudaOptions, err := ort.NewCUDAProviderOptions()
-		if err != nil {
-			return fmt.Errorf("创建 CUDAProviderOptions 失败: %w", err)
-		}
-		defer cudaOptions.Destroy()
-		if err := options.AppendExecutionProviderCUDA(cudaOptions); err != nil {
-			return fmt.Errorf("添加 CUDA 执行提供者失败: %w", err)
+		if err := options.EnableCUDA(); err != nil {
+			return fmt.Errorf("启用 CUDA 失败: %w", err)
 		}
 	}
 	cfg.SessionOptions = options
+	cfg.OnnxEngine = onnxEngine
 
 	return nil
 }

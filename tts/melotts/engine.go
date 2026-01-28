@@ -3,15 +3,15 @@ package melotts
 import (
 	"fmt"
 	"github.com/getcharzp/go-speech"
+	ort "github.com/getcharzp/onnxruntime_purego"
 	"github.com/up-zero/gotool/convertutil"
 	"github.com/up-zero/gotool/mediautil"
-	ort "github.com/yalue/onnxruntime_go"
 )
 
 // Engine 封装了 MeloTTS 的 ONNX 运行时和相关资源
 // 不仅持有模型会话，还缓存了分词器和词典数据
 type Engine struct {
-	session  *ort.DynamicAdvancedSession
+	session  *ort.Session
 	lexicon  map[string]LexiconItem
 	tokenMap map[string]int64
 	config   Config
@@ -19,12 +19,11 @@ type Engine struct {
 
 // NewEngine 初始化 MeloTTS 引擎
 func NewEngine(cfg Config) (*Engine, error) {
-	onnxConfig := new(speech.OnnxConfig)
-	if err := convertutil.CopyProperties(cfg, onnxConfig); err != nil {
-		return nil, fmt.Errorf("复制参数失败: %w", err)
-	}
+	oc := new(speech.OnnxConfig)
+	_ = convertutil.CopyProperties(cfg, oc)
+
 	// 初始化 ONNX
-	if err := onnxConfig.New(); err != nil {
+	if err := oc.New(); err != nil {
 		return nil, err
 	}
 
@@ -43,9 +42,7 @@ func NewEngine(cfg Config) (*Engine, error) {
 	}
 
 	// 创建 ONNX 会话
-	inputNames := []string{"x", "x_lengths", "tones", "sid", "noise_scale", "length_scale", "noise_scale_w"}
-	outputNames := []string{"y"}
-	session, err := ort.NewDynamicAdvancedSession(cfg.ModelPath, inputNames, outputNames, onnxConfig.SessionOptions)
+	session, err := oc.OnnxEngine.NewSession(cfg.ModelPath, oc.SessionOptions)
 	if err != nil {
 		return nil, fmt.Errorf("创建 ONNX 会话失败: %w", err)
 	}
@@ -94,11 +91,10 @@ func (e *Engine) SynthesizeToWav(text string, speed float32) ([]byte, error) {
 }
 
 // Destroy 释放相关资源
-func (e *Engine) Destroy() error {
+func (e *Engine) Destroy() {
 	if e.session != nil {
-		return e.session.Destroy()
+		e.session.Destroy()
 	}
-	return nil
 }
 
 // runInference 推理
@@ -106,22 +102,22 @@ func (e *Engine) runInference(inputIDs []int64, toneIDs []int64, speed float32) 
 	seqLength := int64(len(inputIDs))
 
 	// 构建张量
-	tX, err := ort.NewTensor(ort.NewShape(1, seqLength), inputIDs)
+	tX, err := ort.NewTensor([]int64{1, seqLength}, inputIDs)
 	if err != nil {
 		return nil, fmt.Errorf("创建 X tensor 失败: %w", err)
 	}
 	defer tX.Destroy()
-	tLen, err := ort.NewTensor(ort.NewShape(1), []int64{seqLength})
+	tLen, err := ort.NewTensor([]int64{1}, []int64{seqLength})
 	if err != nil {
 		return nil, fmt.Errorf("创建 length tensor 失败: %w", err)
 	}
 	defer tLen.Destroy()
-	tTones, err := ort.NewTensor(ort.NewShape(1, seqLength), toneIDs)
+	tTones, err := ort.NewTensor([]int64{1, seqLength}, toneIDs)
 	if err != nil {
 		return nil, fmt.Errorf("创建 tones tensor 失败: %w", err)
 	}
 	defer tTones.Destroy()
-	tSid, err := ort.NewTensor(ort.NewShape(1), []int64{speakerID})
+	tSid, err := ort.NewTensor([]int64{1}, []int64{speakerID})
 	if err != nil {
 		return nil, fmt.Errorf("创建 sid tensor 失败: %w", err)
 	}
@@ -129,7 +125,7 @@ func (e *Engine) runInference(inputIDs []int64, toneIDs []int64, speed float32) 
 
 	// 参数控制
 	// noise_scale (0.667), length_scale (1.0 / speed), noise_scale_w (0.8)
-	// 注意: length_scale 控制语速，值越大语速越慢，所以用 1.0/speed
+	// length_scale 控制语速，值越大语速越慢，所以用 1.0/speed
 	noiseScale := float32(0.667)
 	lengthScale := float32(1.0)
 	if speed > 0 {
@@ -137,39 +133,47 @@ func (e *Engine) runInference(inputIDs []int64, toneIDs []int64, speed float32) 
 	}
 	noiseScaleW := float32(0.8)
 
-	tNoise, err := ort.NewTensor(ort.NewShape(1), []float32{noiseScale})
+	tNoise, err := ort.NewTensor([]int64{1}, []float32{noiseScale})
 	if err != nil {
 		return nil, fmt.Errorf("创建 noise_scale tensor 失败: %w", err)
 	}
 	defer tNoise.Destroy()
-	tLScale, err := ort.NewTensor(ort.NewShape(1), []float32{lengthScale})
+	tLScale, err := ort.NewTensor([]int64{1}, []float32{lengthScale})
 	if err != nil {
 		return nil, fmt.Errorf("创建 length_scale tensor 失败: %w", err)
 	}
 	defer tLScale.Destroy()
-	tNoiseW, err := ort.NewTensor(ort.NewShape(1), []float32{noiseScaleW})
+	tNoiseW, err := ort.NewTensor([]int64{1}, []float32{noiseScaleW})
 	if err != nil {
 		return nil, fmt.Errorf("创建 noise_scale_w tensor 失败: %w", err)
 	}
 	defer tNoiseW.Destroy()
 
-	inputs := []ort.Value{tX, tLen, tTones, tSid, tNoise, tLScale, tNoiseW}
-	outputs := make([]ort.Value, 1)
+	inputValues := map[string]*ort.Value{
+		"x":             tX,
+		"x_lengths":     tLen,
+		"tones":         tTones,
+		"sid":           tSid,
+		"noise_scale":   tNoise,
+		"length_scale":  tLScale,
+		"noise_scale_w": tNoiseW,
+	}
 
 	// 执行
-	if err := e.session.Run(inputs, outputs); err != nil {
+	outputValues, err := e.session.Run(inputValues)
+	if err != nil {
 		return nil, fmt.Errorf("推理运行失败: %w", err)
 	}
-	defer outputs[0].Destroy()
+	outputValue := outputValues["y"]
+	defer outputValue.Destroy()
 
 	// 获取结果
-	resultTensor, ok := outputs[0].(*ort.Tensor[float32])
-	if !ok {
-		return nil, fmt.Errorf("推理输出类型断言失败，期望 *Tensor[float32]")
+	rawData, err := ort.GetTensorData[float32](outputValue)
+	if err != nil {
+		return nil, fmt.Errorf("获取输出数据失败: %w", err)
 	}
 
 	// 拷贝数据
-	rawData := resultTensor.GetData()
 	result := make([]float32, len(rawData))
 	copy(result, rawData)
 

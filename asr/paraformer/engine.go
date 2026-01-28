@@ -3,8 +3,8 @@ package paraformer
 import (
 	"fmt"
 	"github.com/getcharzp/go-speech"
+	ort "github.com/getcharzp/onnxruntime_purego"
 	"github.com/up-zero/gotool/convertutil"
-	ort "github.com/yalue/onnxruntime_go"
 	"math"
 	"os"
 	"strings"
@@ -12,7 +12,7 @@ import (
 
 // Engine 封装了 Paraformer ASR 的 ONNX 运行时和相关资源
 type Engine struct {
-	session  *ort.DynamicAdvancedSession
+	session  *ort.Session
 	tokenMap map[int]string
 	negMean  []float32 // CMVN 均值
 	invStd   []float32 // CMVN 方差倒数
@@ -20,12 +20,11 @@ type Engine struct {
 
 // NewEngine 初始化 Paraformer ASR 引擎
 func NewEngine(cfg Config) (*Engine, error) {
-	onnxConfig := new(speech.OnnxConfig)
-	if err := convertutil.CopyProperties(cfg, onnxConfig); err != nil {
-		return nil, fmt.Errorf("复制参数失败: %w", err)
-	}
+	oc := new(speech.OnnxConfig)
+	_ = convertutil.CopyProperties(cfg, oc)
+
 	// 初始化 ONNX
-	if err := onnxConfig.New(); err != nil {
+	if err := oc.New(); err != nil {
 		return nil, err
 	}
 
@@ -41,14 +40,7 @@ func NewEngine(cfg Config) (*Engine, error) {
 	}
 
 	// 创建 ONNX 会话
-	inputNames := []string{"speech", "speech_lengths"}
-	outputNames := []string{"logits"}
-	session, err := ort.NewDynamicAdvancedSession(
-		cfg.ModelPath,
-		inputNames,
-		outputNames,
-		onnxConfig.SessionOptions,
-	)
+	session, err := oc.OnnxEngine.NewSession(cfg.ModelPath, oc.SessionOptions)
 	if err != nil {
 		return nil, fmt.Errorf("创建 ONNX 会话失败: %w", err)
 	}
@@ -62,11 +54,10 @@ func NewEngine(cfg Config) (*Engine, error) {
 }
 
 // Destroy 释放相关资源
-func (p *Engine) Destroy() error {
-	if p.session != nil {
-		return p.session.Destroy()
+func (e *Engine) Destroy() {
+	if e.session != nil {
+		e.session.Destroy()
 	}
-	return nil
 }
 
 // TranscribeFile 读取 WAV 文件并进行语音识别
@@ -74,12 +65,12 @@ func (p *Engine) Destroy() error {
 // # Params:
 //
 //	wavPath: 音频文件路径
-func (p *Engine) TranscribeFile(wavPath string) (string, error) {
+func (e *Engine) TranscribeFile(wavPath string) (string, error) {
 	wavBytes, err := os.ReadFile(wavPath)
 	if err != nil {
 		return "", fmt.Errorf("无法读取文件: %v", err)
 	}
-	return p.TranscribeBytes(wavBytes)
+	return e.TranscribeBytes(wavBytes)
 }
 
 // TranscribeBytes 读取 WAV 字节流并进行语音识别
@@ -87,12 +78,12 @@ func (p *Engine) TranscribeFile(wavPath string) (string, error) {
 // # Params:
 //
 //	wavBytes: 音频文件字节流
-func (p *Engine) TranscribeBytes(wavBytes []byte) (string, error) {
+func (e *Engine) TranscribeBytes(wavBytes []byte) (string, error) {
 	samples, err := parseWavBytes(wavBytes)
 	if err != nil {
 		return "", fmt.Errorf("无法将 PCM 数据转换为 float32: %v", err)
 	}
-	return p.Transcribe(samples)
+	return e.Transcribe(samples)
 }
 
 // Transcribe 对 float32 音频样本数据进行识别
@@ -100,64 +91,67 @@ func (p *Engine) TranscribeBytes(wavBytes []byte) (string, error) {
 // # Params:
 //
 //	samples: 采样率为 16KHz 的单声道音频数据，范围 [-1, 1]
-func (p *Engine) Transcribe(samples []float32) (string, error) {
+func (e *Engine) Transcribe(samples []float32) (string, error) {
 	if len(samples) == 0 {
 		return "", fmt.Errorf("输入的音频数据为空")
 	}
 
 	// 特征提取
-	features, featLen, err := p.extractFeatures(samples)
+	features, featLen, err := e.extractFeatures(samples)
 	if err != nil {
 		return "", err
 	}
 
 	// 推理
-	tokenIDs, err := p.runInference(features, featLen)
+	tokenIDs, err := e.runInference(features, featLen)
 	if err != nil {
 		return "", err
 	}
 
 	// 解码
-	text := p.decode(tokenIDs)
+	text := e.decode(tokenIDs)
 	return text, nil
 }
 
 // runInference 推理
-func (p *Engine) runInference(features []float32, featLen int32) ([]int, error) {
+func (e *Engine) runInference(features []float32, featLen int32) ([]int, error) {
 	// 构建张量
-	tSpeech, err := ort.NewTensor(ort.NewShape(1, int64(featLen), 560), features)
+	tSpeech, err := ort.NewTensor([]int64{1, int64(featLen), 560}, features)
 	if err != nil {
 		return nil, fmt.Errorf("创建 speech tensor 失败: %w", err)
 	}
 	defer tSpeech.Destroy()
-	tLen, err := ort.NewTensor(ort.NewShape(1), []int32{featLen})
+	tLen, err := ort.NewTensor([]int64{1}, []int32{featLen})
 	if err != nil {
 		return nil, fmt.Errorf("创建 length tensor 失败: %w", err)
 	}
 	defer tLen.Destroy()
 
-	inputs := []ort.Value{tSpeech, tLen}
-	outputs := make([]ort.Value, 1)
+	inputValues := map[string]*ort.Value{
+		"speech":         tSpeech,
+		"speech_lengths": tLen,
+	}
 
 	// 执行
-	if err := p.session.Run(inputs, outputs); err != nil {
+	outputValues, err := e.session.Run(inputValues)
+	if err != nil {
 		return nil, fmt.Errorf("推理运行失败: %w", err)
 	}
-	defer outputs[0].Destroy()
+	outputValue := outputValues["logits"]
+	defer outputValue.Destroy()
 
 	// 获取结果
-	resultTensor, ok := outputs[0].(*ort.Tensor[float32])
-	if !ok {
-		return nil, fmt.Errorf("推理输出类型断言失败，期望 *Tensor[float32]")
+	data, err := ort.GetTensorData[float32](outputValue)
+	if err != nil {
+		return nil, fmt.Errorf("获取输出数据失败: %w", err)
 	}
 
-	rawData := resultTensor.GetData()
-	outputShape := resultTensor.GetShape() // [1, T_out, TokenSize]
-	if len(outputShape) < 3 {
-		return nil, fmt.Errorf("输出结果维度异常: %+v", outputShape)
+	outputShape, err := outputValue.GetShape() // [1, T_out, TokenSize]
+	if err != nil {
+		return nil, fmt.Errorf("输出结果维度异常: %w", err)
 	}
 
-	return getTokenIds(rawData, int(outputShape[1]), int(outputShape[2])), nil
+	return getTokenIds(data, int(outputShape[1]), int(outputShape[2])), nil
 }
 
 // 获取 token ids
@@ -186,10 +180,10 @@ func getTokenIds(tokenScores []float32, steps int, tokenSize int) []int {
 }
 
 // decode 解码，将 token ids 转换为文本
-func (p *Engine) decode(ids []int) string {
+func (e *Engine) decode(ids []int) string {
 	var sb strings.Builder
 	for _, idx := range ids {
-		if word, ok := p.tokenMap[idx]; ok {
+		if word, ok := e.tokenMap[idx]; ok {
 			if word == "<blank>" || word == "<s>" || word == "</s>" || word == "<unk>" {
 				sb.WriteByte(' ')
 			} else if strings.HasSuffix(word, "@@") {
