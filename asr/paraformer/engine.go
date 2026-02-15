@@ -1,10 +1,12 @@
 package paraformer
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/getcharzp/go-speech"
 	ort "github.com/getcharzp/onnxruntime_purego"
 	"github.com/up-zero/gotool/convertutil"
+	"github.com/up-zero/gotool/validator"
 	"math"
 	"os"
 	"strings"
@@ -16,6 +18,11 @@ type Engine struct {
 	tokenMap map[int]string
 	negMean  []float32 // CMVN 均值
 	invStd   []float32 // CMVN 方差倒数
+
+	// 标点模型相关
+	punctuationSession  *ort.Session
+	punctuationTokenMap map[string]int // 文本 -> ID
+	punctuationList     []string       // 标点符号
 }
 
 // NewEngine 初始化 Paraformer ASR 引擎
@@ -45,18 +52,43 @@ func NewEngine(cfg Config) (*Engine, error) {
 		return nil, fmt.Errorf("创建 ONNX 会话失败: %w", err)
 	}
 
-	return &Engine{
+	engine := &Engine{
 		session:  session,
 		tokenMap: tokenMap,
 		negMean:  negMean,
 		invStd:   invStd,
-	}, nil
+	}
+
+	// 加载标点模型
+	if cfg.PunctuationModelPath != "" && cfg.PunctuationTokensPath != "" {
+		// 加载标点词表 tokens.json
+		pTokenMap, err := loadPunctuationTokens(cfg.PunctuationTokensPath)
+		if err != nil {
+			return nil, fmt.Errorf("加载标点词表失败: %w", err)
+		}
+		engine.punctuationTokenMap = pTokenMap
+		// CT-Transformer 标点定义
+		// 0:<unk>, 1:_, 2:，, 3:。, 4:？, 5:、
+		engine.punctuationList = []string{"", "", "，", "。", "？", "、"}
+
+		// 创建标点模型会话
+		pSession, err := oc.OnnxEngine.NewSession(cfg.PunctuationModelPath, oc.SessionOptions)
+		if err != nil {
+			return nil, err
+		}
+		engine.punctuationSession = pSession
+	}
+
+	return engine, nil
 }
 
 // Destroy 释放相关资源
 func (e *Engine) Destroy() {
 	if e.session != nil {
 		e.session.Destroy()
+	}
+	if e.punctuationSession != nil {
+		e.punctuationSession.Destroy()
 	}
 }
 
@@ -109,8 +141,17 @@ func (e *Engine) Transcribe(samples []float32) (string, error) {
 	}
 
 	// 解码
-	text := e.decode(tokenIDs)
-	return text, nil
+	words := e.decode(tokenIDs)
+
+	// 标点预测
+	if e.punctuationSession != nil {
+		words, err = e.runPunctuationInference(words)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return e.join(words), nil
 }
 
 // runInference 推理
@@ -180,17 +221,116 @@ func getTokenIds(tokenScores []float32, steps int, tokenSize int) []int {
 }
 
 // decode 解码，将 token ids 转换为文本
-func (e *Engine) decode(ids []int) string {
-	var sb strings.Builder
+func (e *Engine) decode(ids []int) []string {
+	var words []string
+	var currentWord strings.Builder
+
 	for _, idx := range ids {
 		if word, ok := e.tokenMap[idx]; ok {
 			if word == "<blank>" || word == "<s>" || word == "</s>" || word == "<unk>" {
-				sb.WriteByte(' ')
+				continue
 			} else if strings.HasSuffix(word, "@@") {
-				word = strings.ReplaceAll(word, "@@", "")
-				sb.WriteString(word)
+				currentWord.WriteString(strings.ReplaceAll(word, "@@", ""))
 			} else {
-				sb.WriteString(word)
+				currentWord.WriteString(word)
+				words = append(words, currentWord.String())
+				currentWord.Reset()
+			}
+		}
+	}
+	if currentWord.Len() > 0 {
+		words = append(words, currentWord.String())
+	}
+	return words
+}
+
+// loadPunctuationTokens 加载标点 JSON 词表
+func loadPunctuationTokens(path string) (map[string]int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var tokenList []string
+	if err := json.Unmarshal(data, &tokenList); err != nil {
+		return nil, err
+	}
+
+	tokenMap := make(map[string]int, len(tokenList))
+	for i, token := range tokenList {
+		tokenMap[token] = i
+	}
+	return tokenMap, nil
+}
+
+// runPunctuationInference 执行标点预测
+func (e *Engine) runPunctuationInference(words []string) ([]string, error) {
+	if e.punctuationSession == nil || len(words) == 0 {
+		return []string{}, nil
+	}
+
+	// 获取标点模型的输入ID
+	inputIds := make([]int32, len(words))
+	for i, w := range words {
+		if id, ok := e.punctuationTokenMap[w]; ok {
+			inputIds[i] = int32(id)
+		} else {
+			inputIds[i] = int32(e.punctuationTokenMap["<unk>"])
+		}
+	}
+
+	tInputs, _ := ort.NewTensor([]int64{1, int64(len(inputIds))}, inputIds)
+	defer tInputs.Destroy()
+
+	tLengths, _ := ort.NewTensor([]int64{1}, []int32{int32(len(inputIds))})
+	defer tLengths.Destroy()
+
+	// 推理
+	outputValues, err := e.punctuationSession.Run(map[string]*ort.Value{
+		"inputs":       tInputs,
+		"text_lengths": tLengths,
+	})
+	if err != nil {
+		return []string{}, err
+	}
+	tLogits := outputValues["logits"]
+	defer tLogits.Destroy()
+
+	// 解析结果 [1, N, 6]
+	data, _ := ort.GetTensorData[float32](tLogits)
+	shape, _ := tLogits.GetShape()
+	numSteps := int(shape[1])
+	numClasses := int(shape[2])
+
+	var newWords []string
+	for i := 0; i < numSteps; i++ {
+		offset := i * numClasses
+		newWords = append(newWords, words[i])
+
+		// 计算当前位置概率最大的标点索引
+		maxIdx := 0
+		var maxVal float32 = -1e9
+		for j := 0; j < numClasses; j++ {
+			val := data[offset+j]
+			if val > maxVal {
+				maxVal = val
+				maxIdx = j
+			}
+		}
+
+		if maxIdx > 0 && maxIdx < len(e.punctuationList) && maxIdx != 1 {
+			newWords = append(newWords, e.punctuationList[maxIdx])
+		}
+	}
+	return newWords, nil
+}
+
+// join 单词拼接
+func (e *Engine) join(words []string) string {
+	var sb strings.Builder
+	for i, w := range words {
+		sb.WriteString(w)
+		if i < len(words)-1 {
+			if !validator.IsChinese(w) || !validator.IsChinese(words[i+1]) {
 				sb.WriteByte(' ')
 			}
 		}

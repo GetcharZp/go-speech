@@ -8,10 +8,12 @@ import (
 
 func TestParaformer(t *testing.T) {
 	config := paraformer.Config{
-		OnnxRuntimeLibPath: "../lib/onnxruntime.dll",
-		ModelPath:          "../paraformer_weights/model.int8.onnx",
-		TokensPath:         "../paraformer_weights/tokens.txt",
-		CMVNPath:           "../paraformer_weights/am.mvn",
+		OnnxRuntimeLibPath:    "../lib/onnxruntime.dll",
+		ModelPath:             "../paraformer_weights/model.int8.onnx",
+		TokensPath:            "../paraformer_weights/tokens.txt",
+		CMVNPath:              "../paraformer_weights/am.mvn",
+		PunctuationModelPath:  "../paraformer_weights/punctuation_model.onnx",
+		PunctuationTokensPath: "../paraformer_weights/punctuation_tokens.json",
 	}
 
 	asrEngine, err := paraformer.NewEngine(config)

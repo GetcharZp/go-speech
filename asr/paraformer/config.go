@@ -20,9 +20,11 @@ type Config struct {
 	CMVNPath           string // am.mvn 文件路径
 
 	// 可选参数
-	UseCuda           bool // (可选) 是否启用 CUDA
-	NumThreads        int  // (可选) ONNX 线程数, 默认由CPU核心数决定
-	EnableCpuMemArena bool // (可选) 是否启用内存池
+	PunctuationModelPath  string // 标点模型路径
+	PunctuationTokensPath string // 标点 tokens.json 路径
+	UseCuda               bool   // (可选) 是否启用 CUDA
+	NumThreads            int    // (可选) ONNX 线程数, 默认由CPU核心数决定
+	EnableCpuMemArena     bool   // (可选) 是否启用内存池
 }
 
 // DefaultConfig 返回一套默认的配置 (基于常见的目录结构)
