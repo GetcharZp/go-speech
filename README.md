@@ -21,7 +21,8 @@ tags:
    </a>
 </p>
 
-go-speech 基于 Golang + [ONNX](https://github.com/microsoft/onnxruntime/releases/tag/v1.23.2) 构建的轻量语音库，支持 TTS（文本转语音）与 ASR（语音转文字）。 集成 MeloTTS 、达摩院 Paraformer 架构模型、Whisper 模型。
+go-speech 基于 Golang + [ONNX](https://github.com/microsoft/onnxruntime/releases/tag/v1.23.2) 构建的轻量语音库，支持 TTS（文本转语音）与 ASR（语音转文字）。 
+集成 MeloTTS、Piper、达摩院 Paraformer 架构模型、Whisper 模型。
 
 ## 安装
 
@@ -36,6 +37,8 @@ git clone https://huggingface.co/getcharzp/go-speech
 ## 快速开始
 
 ### TTS
+
+#### [MeloTTS](https://github.com/myshell-ai/MeloTTS) 支持中英混合合成
 
 ```go
 package main
@@ -69,6 +72,48 @@ func main() {
 
 <audio controls>
   <source src="https://media.githubusercontent.com/media/GetcharZp/go-speech/master/assets/output.wav" type="audio/wav">
+</audio>
+
+#### [Piper](https://github.com/rhasspy/piper) 支持中文合成
+
+```go
+package main
+
+import (
+	"github.com/getcharzp/go-speech/tts/pipertts"
+	"github.com/up-zero/gotool/fileutil"
+	"log"
+)
+
+func main() {
+	cfg := pipertts.Config{
+		OnnxRuntimeLibPath: "../lib/onnxruntime.dll",
+		ModelPath:          "../pipertts_weights/zh_CN-xiao_ya-medium.onnx",
+		ConfigPath:         "../pipertts_weights/zh_CN-xiao_ya-medium.onnx.json",
+	}
+
+	ttsEngine, err := pipertts.NewEngine(cfg)
+	if err != nil {
+		log.Fatalf("创建引擎失败: %v", err)
+	}
+	defer ttsEngine.Destroy()
+
+	testText := "2019年12月30日，中国人口突破14亿人。联系电话: 13800138000。"
+	wavBytes, err := ttsEngine.SynthesizeToWav(testText)
+	if err != nil {
+		log.Fatalf("合成失败: %v", err)
+	}
+
+	outputPath := "pipertts_output.wav"
+	err = fileutil.FileSave(outputPath, wavBytes)
+	if err != nil {
+		log.Fatalf("保存失败: %v", err)
+	}
+}
+```
+
+<audio controls>
+  <source src="https://media.githubusercontent.com/media/GetcharZp/go-speech/master/examples/pipertts_output.wav" type="audio/wav">
 </audio>
 
 ### ASR

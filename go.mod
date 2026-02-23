@@ -7,4 +7,7 @@ require (
 	github.com/up-zero/gotool v0.0.0-20260214093844-61edc8b0ab17
 )
 
-require github.com/ebitengine/purego v0.9.1 // indirect
+require (
+	github.com/ebitengine/purego v0.9.1 // indirect
+	github.com/mozillazg/go-pinyin v0.21.0 // indirect
+)
