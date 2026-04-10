@@ -19,6 +19,27 @@ func (e *Engine) textToIds(text string) ([]int64, []int64, error) {
 		}
 		lowerWord := strings.ToLower(word)
 
+		// 数字规范化: 纯数字段先转换为对应语言的文字形式再查词典
+		if isAllDigits(lowerWord) {
+			expanded := expandNumber(lowerWord, e.lang)
+			if expanded != lowerWord {
+				subSegments := smartSegment(expanded)
+				for _, sub := range subSegments {
+					sub = strings.ToLower(strings.TrimSpace(sub))
+					if sub == "" {
+						continue
+					}
+					if e.appendIdsFromLexicon(sub, &ids, &tones) {
+						continue
+					}
+					if id, ok := e.tokenMap[sub]; ok {
+						e.appendToken(id, 0, &ids, &tones)
+					}
+				}
+				continue
+			}
+		}
+
 		// 查词典 (优先全匹配)
 		if e.appendIdsFromLexicon(lowerWord, &ids, &tones) {
 			continue

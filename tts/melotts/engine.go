@@ -1,7 +1,11 @@
 package melotts
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/getcharzp/go-speech"
 	ort "github.com/getcharzp/onnxruntime_purego"
 	"github.com/up-zero/gotool/convertutil"
@@ -15,6 +19,7 @@ type Engine struct {
 	lexicon  map[string]LexiconItem
 	tokenMap map[string]int64
 	config   Config
+	lang     string // 语言代码，用于数字规范化
 }
 
 // NewEngine 初始化 MeloTTS 引擎
@@ -47,12 +52,34 @@ func NewEngine(cfg Config) (*Engine, error) {
 		return nil, fmt.Errorf("创建 ONNX 会话失败: %w", err)
 	}
 
+	lang := cfg.Language
+	if lang == "" {
+		lang = detectLanguage(cfg.ModelPath)
+	}
+
 	return &Engine{
 		session:  session,
 		lexicon:  lexicon,
 		tokenMap: tokenMap,
 		config:   cfg,
+		lang:     lang,
 	}, nil
+}
+
+// detectLanguage reads language_code from metadata.json in the same directory as modelPath.
+func detectLanguage(modelPath string) string {
+	metaPath := filepath.Join(filepath.Dir(modelPath), "metadata.json")
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return ""
+	}
+	var meta struct {
+		LanguageCode string `json:"language_code"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return ""
+	}
+	return meta.LanguageCode
 }
 
 // Synthesize 将文本转换为语音数据 (float32 PCM)
