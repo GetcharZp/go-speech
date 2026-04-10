@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/getcharzp/go-speech"
 	ort "github.com/getcharzp/onnxruntime_purego"
@@ -54,7 +55,17 @@ func NewEngine(cfg Config) (*Engine, error) {
 
 	lang := cfg.Language
 	if lang == "" {
-		lang = detectLanguage(cfg.ModelPath)
+		lang = detectMetadata(cfg.ModelPath).LanguageCode
+	}
+	// 统一转小写 ISO 639-1 标准
+	lang = strings.ToLower(lang)
+
+	// SpeakerID: 配置优先；metadata 有则用 metadata 的值
+	if cfg.SpeakerID == 0 {
+		meta := detectMetadata(cfg.ModelPath)
+		if meta.SpeakerID != 0 {
+			cfg.SpeakerID = meta.SpeakerID
+		}
 	}
 
 	return &Engine{
@@ -66,20 +77,24 @@ func NewEngine(cfg Config) (*Engine, error) {
 	}, nil
 }
 
-// detectLanguage reads language_code from metadata.json in the same directory as modelPath.
-func detectLanguage(modelPath string) string {
+// modelMeta holds the fields we care about from metadata.json.
+type modelMeta struct {
+	LanguageCode string `json:"language_code"`
+	SpeakerID    int64  `json:"speaker_id"`
+}
+
+// detectMetadata reads language_code and speaker_id from metadata.json.
+func detectMetadata(modelPath string) modelMeta {
 	metaPath := filepath.Join(filepath.Dir(modelPath), "metadata.json")
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
-		return ""
+		return modelMeta{}
 	}
-	var meta struct {
-		LanguageCode string `json:"language_code"`
+	var m modelMeta
+	if err := json.Unmarshal(data, &m); err != nil {
+		return modelMeta{}
 	}
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return ""
-	}
-	return meta.LanguageCode
+	return m
 }
 
 // Synthesize 将文本转换为语音数据 (float32 PCM)
@@ -94,7 +109,7 @@ func (e *Engine) Synthesize(text string, speed float32) ([]float32, error) {
 	// 数字的各语言展开在 textToIds 内按 e.lang 处理。
 	var normalizedText string
 	switch e.lang {
-	case "ZH", "ZH_MIX_EN":
+	case "zh":
 		normalizedText = convertutil.TextToChinese(text)
 	default:
 		normalizedText = text

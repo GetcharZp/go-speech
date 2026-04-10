@@ -33,17 +33,17 @@ func expandNumber(numStr string, lang string) string {
 		n = n*10 + d
 	}
 
-	switch strings.ToUpper(lang) {
-	case "EN", "EN_V2", "EN_NEWEST":
+	switch lang {
+	case "en", "en_v2", "en_newest":
 		if overflow {
 			return digitByDigit(numStr, enDigitWords)
 		}
 		return numberToWordsEN(n)
-	case "ZH", "ZH_MIX_EN":
+	case "zh":
 		// Handled upstream by convertutil.TextToChinese
 		return numStr
 	default:
-		// For KR, JP, FR, ES — expand digit by digit using language-specific single-digit words.
+		// For ko, ja, fr, es — expand digit by digit using language-specific single-digit words.
 		words := digitWordsFor(lang)
 		if words == nil {
 			return numStr
@@ -65,18 +65,18 @@ func digitByDigit(numStr string, words [10]string) string {
 
 // digitWordsFor returns the single-digit word table for a language, or nil if unsupported.
 func digitWordsFor(lang string) *[10]string {
-	switch strings.ToUpper(lang) {
-	case "KR":
+	switch lang {
+	case "ko":
 		// Sino-Korean numerals (used in most counting contexts; all common words in KR lexicon)
 		return &[10]string{"영", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구"}
-	case "JP":
+	case "ja":
 		// Japanese numerals in kanji (present in JP lexicon via MeCab)
 		return &[10]string{"零", "一", "二", "三", "四", "五", "六", "七", "八", "九"}
-	case "FR":
+	case "fr":
 		// French digit words (0-9 already have entries in FR lexicon, but provide
 		// the word form as well so the word lookup path also works)
 		return &[10]string{"zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"}
-	case "ES":
+	case "es":
 		return &[10]string{"cero", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"}
 	}
 	return nil
