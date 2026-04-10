@@ -5,8 +5,6 @@ import "github.com/getcharzp/go-speech"
 const (
 	// SampleRate 采样率，默认为 44100
 	SampleRate = 44100
-	// speakerID 说话人 ID
-	speakerID = 1
 	// channels 声道数
 	channels = 1
 	// bitsPerSample 采样位数
@@ -23,6 +21,7 @@ type Config struct {
 
 	// 可选参数
 	Language          string // (可选) 语言代码, 如 "EN"/"KR"/"ZH"等; 留空则从 metadata.json 自动检测
+	SpeakerID         int64  // (可选) 说话人 ID, 默认为 0
 	UseCuda           bool   // (可选) 是否启用 CUDA
 	NumThreads        int    // (可选) ONNX 线程数, 默认由CPU核心数决定
 	EnableCpuMemArena bool   // (可选) 是否启用内存池

@@ -144,7 +144,7 @@ func (e *Engine) runInference(inputIDs []int64, toneIDs []int64, speed float32) 
 		return nil, fmt.Errorf("创建 tones tensor 失败: %w", err)
 	}
 	defer tTones.Destroy()
-	tSid, err := ort.NewTensor([]int64{1}, []int64{speakerID})
+	tSid, err := ort.NewTensor([]int64{1}, []int64{e.config.SpeakerID})
 	if err != nil {
 		return nil, fmt.Errorf("创建 sid tensor 失败: %w", err)
 	}
