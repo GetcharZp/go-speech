@@ -89,8 +89,16 @@ func detectLanguage(modelPath string) string {
 //	text: 需要转换的文本
 //	speed: 语速调节,数值越大越快,1.0为正常语速
 func (e *Engine) Synthesize(text string, speed float32) ([]float32, error) {
-	// 文本标准化
-	normalizedText := convertutil.TextToChinese(text)
+	// 文本标准化: 中文模型用 TextToChinese 转换数字/符号为汉字；
+	// 其他语言跳过，避免将数字转成中文字符导致 lexicon 查不到。
+	// 数字的各语言展开在 textToIds 内按 e.lang 处理。
+	var normalizedText string
+	switch e.lang {
+	case "ZH", "ZH_MIX_EN":
+		normalizedText = convertutil.TextToChinese(text)
+	default:
+		normalizedText = text
+	}
 
 	// 文本转 ID (G2P)
 	inputIDs, toneIDs, err := e.textToIds(normalizedText)
