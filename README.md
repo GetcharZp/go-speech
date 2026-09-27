@@ -26,13 +26,28 @@ go-speech 基于 Golang + [ONNX](https://github.com/microsoft/onnxruntime/releas
 
 ## 安装
 
-```shell
-# 下载包
-go get -u github.com/getcharzp/go-speech
+### 1. 安装 Go 依赖
 
-# 下载模型、动态链接库
-git clone https://huggingface.co/getcharzp/go-speech
+```shell
+go get -u github.com/getcharzp/go-speech
 ```
+
+### 2. 按需下载模型与动态链接库
+
+模型与动态链接库存放在独立仓库（HuggingFace，含 ModelScope 国内镜像），**无需全量下载**，请根据实际使用的引擎按需下载所需文件。
+
+- HuggingFace 仓库地址：[https://huggingface.co/getcharzp/go-speech](https://huggingface.co/getcharzp/go-speech)
+- ModelScope 镜像地址：[https://www.modelscope.cn/getcharzp/go-speech](https://www.modelscope.cn/getcharzp/go-speech)
+
+**动态链接库选择**
+
+onnxruntime 动态链接库需按运行平台选择（默认放置于 `lib/` 目录，可通过 `OnnxRuntimeLibPath` 自定义路径）：
+
+| 平台 | 文件 |
+| --- | --- |
+| Linux | `lib/onnxruntime_amd64.so` |
+| Windows | `lib/onnxruntime.dll` |
+| macOS | `lib/onnxruntime_amd64.dylib` |
 
 ## 快速开始
 
